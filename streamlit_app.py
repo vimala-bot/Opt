@@ -1,13 +1,32 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime, timedelta
-import time
 
 st.set_page_config(page_title="Quant Options Screener", layout="wide")
+
+# Native Pandas Technical Indicators (No pandas-ta dependency)
+def calculate_technicals(df):
+    close = df['Close']
+    
+    # 200 EMA
+    df['EMA_200'] = close.ewm(span=200, adjust=False).mean()
+    
+    # 14 RSI
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    df['RSI_14'] = 100 - (100 / (1 + rs))
+    
+    # MACD (12, 26, 9)
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    return df
 
 # Quantitative Pricing Module
 def calc_black_scholes_delta(S, K, T, r, sigma, option_type='call'):
@@ -56,17 +75,15 @@ def load_data():
             
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             
-            df.ta.rsi(length=14, append=True)
-            df.ta.ema(length=200, append=True)
-            df.ta.macd(fast=12, slow=26, signal=9, append=True)
+            df = calculate_technicals(df)
             
             latest, prev = df.iloc[-1], df.iloc[-2]
             current_price = float(latest['Close'])
-            rsi = round(float(latest['RSI_14']), 2)
+            rsi = round(float(latest['RSI_14']), 2) if not pd.isna(latest['RSI_14']) else 50.0
             ema200 = float(latest['EMA_200'])
             
-            macd_line, signal_line = latest['MACD_12_26_9'], latest['MACDs_12_26_9']
-            prev_macd, prev_sig = prev['MACD_12_26_9'], prev['MACDs_12_26_9']
+            macd_line, signal_line = latest['MACD'], latest['MACD_Signal']
+            prev_macd, prev_sig = prev['MACD'], prev['MACD_Signal']
             
             macd_status = "Bearish"
             if macd_line > signal_line and prev_macd <= prev_sig: macd_status = "Bull Cross"
@@ -147,8 +164,8 @@ col3.metric("Oversold (RSI < 35)", len(df[df['RSI'] < 35]))
 
 # Filters
 st.sidebar.header("Filter Criteria")
-sel_sector = st.sidebar.selectbox("Sector", ["All"] + list(df['Sector'].unique()))
-sel_strategy = st.sidebar.selectbox("Target Strategy", ["All"] + list(df['Strategy'].unique()))
+sel_sector = st.sidebar.selectbox("Sector", ["All"] + sorted(list(df['Sector'].unique())))
+sel_strategy = st.sidebar.selectbox("Target Strategy", ["All"] + sorted(list(df['Strategy'].unique())))
 
 filtered_df = df.copy()
 if sel_sector != "All": filtered_df = filtered_df[filtered_df['Sector'] == sel_sector]
