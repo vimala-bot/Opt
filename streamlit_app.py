@@ -251,7 +251,7 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Monitored", len(df))
 c2.metric("ITM LEAPS Setups (Low Vol)", len(df[df['Strategy'] == 'ITM_LEAPS']))
 c3.metric("Short Premium Setups", len(df[df['Strategy'].isin(['PMCC', 'CSP'])]))
-c4.metric("High Volatility Exceedances", len(df[df['HVR'] > 75]))
+c4.metric("High Volatility Exceedances", len(df[df['HVR (Vol Rank)'] > 75]))
 
 # Sidebar Controls
 st.sidebar.markdown("### Strategic Filters")
