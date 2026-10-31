@@ -7,17 +7,14 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Institutional Options Screener", layout="wide", initial_sidebar_state="expanded")
 
-# --- WEALTHSIMPLE BRAND DESIGN SYSTEM CSS ---
+# --- WEALTHSIMPLE & QUANT INSTITUTIONAL CSS ---
 st.markdown("""
 <style>
-    /* Global background and typography */
     .stApp {
         background-color: #FBFBFA;
         color: #32302F;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    
-    /* Metric Cards - Clean Minimalist Wealthsimple Box Style */
     div[data-testid="stMetric"] {
         background-color: #FFFFFF;
         border: 1px solid #EAE8E5;
@@ -37,8 +34,6 @@ st.markdown("""
         font-weight: 700;
         font-size: 1.5rem;
     }
-    
-    /* Strategy Details Card */
     .strategy-card {
         background: #FFFFFF;
         border-radius: 14px;
@@ -48,14 +43,10 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
         margin-top: 20px;
     }
-    
-    /* Wealthsimple Pill Badges */
     .badge-leaps { background: #E6F4ED; color: #178754; padding: 5px 12px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; }
     .badge-pmcc { background: #E1F5FE; color: #0288D1; padding: 5px 12px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; }
     .badge-csp { background: #FFF3E0; color: #E65100; padding: 5px 12px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; }
     .badge-none { background: #F1F0EE; color: #767370; padding: 5px 12px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; }
-    
-    /* Risk Management Callout Box */
     .risk-alert {
         background: #FAFAF9; 
         padding: 16px 20px; 
@@ -64,8 +55,6 @@ st.markdown("""
         border: 1px solid #EAE8E5;
         margin-top: 20px;
     }
-    
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #F4F3F1;
         border-right: 1px solid #EAE8E5;
@@ -73,7 +62,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Quantitative Pricing Module
 def calc_black_scholes_delta(S, K, T, r, sigma, option_type='call'):
     if T <= 0 or pd.isna(sigma) or sigma <= 0: return 0.0
     try:
@@ -91,7 +79,13 @@ def validate_liquidity(row):
 
 def calculate_technicals(df):
     close = df['Close']
+    volume = df['Volume']
     df['EMA_200'] = close.ewm(span=200, adjust=False).mean()
+    
+    # Stock Volume Ratio (Today Volume / 20-day Volume SMA)
+    df['Vol_SMA_20'] = volume.rolling(window=20).mean()
+    df['Stock_Vol_Ratio'] = np.where(df['Vol_SMA_20'] > 0, round(volume / df['Vol_SMA_20'], 2), 1.0)
+
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -109,7 +103,6 @@ def calculate_technicals(df):
     df['HVR'] = ((df['HV_20'] - hv_min) / (hv_max - hv_min)) * 100
     return df
 
-# --- DYNAMIC MARKET HOURS CACHING (15-MINUTE INTERVALS) ---
 def get_market_state_key():
     now = pd.Timestamp.now('US/Eastern')
     if now.dayofweek >= 5:
@@ -126,7 +119,7 @@ def get_market_state_key():
         minute_block = (now.minute // 15) * 15
         return f"open_{now.strftime('%Y-%m-%d_%H')}_{minute_block:02d}"
 
-@st.cache_data(show_spinner="Running Wealthsimple Quant Engine (~3 mins)...")
+@st.cache_data(show_spinner="Running Institutional Quant Engine (~3 mins)...")
 def load_data(market_state_key):
     stocks = [
         "NVDA", "AMD", "TSM", "AVGO", "ASML", "MU", "QCOM", "AMBA", "AAOI", "CRDO", "LITE", "GFS", "NVTS", "NLST", "ON", "LRCX", "SKHY", "CAMT", "ALAB", "AMAT", "KLAC", "ARM",
@@ -184,7 +177,8 @@ def load_data(market_state_key):
             current_price = float(latest['Close'])
             rsi = round(float(latest['RSI_14']), 2) if not pd.isna(latest['RSI_14']) else 50.0
             ema200 = float(latest['EMA_200'])
-            hvr = round(float(latest['HVR']), 2) if not pd.isna(latest['HVR']) else 50.0
+            hvr = round(float(latest['HVR']), 2) if not pd.isna(latest['HVR']), 2) if not pd.isna(latest['HVR']) else 50.0
+            stock_vol_ratio = float(latest['Stock_Vol_Ratio'])
             
             macd_line, signal_line = latest['MACD'], latest['MACD_Signal']
             prev_macd, prev_sig = prev['MACD'], prev['MACD_Signal']
@@ -223,6 +217,7 @@ def load_data(market_state_key):
                 iv_crush_status = "Optimal (Targets Crush)" if hvr > 50 else "Sub-optimal"
 
             setup_data = {}
+            opt_vol_ratio = 0.0
             try:
                 expirations = t_yfinance.options
                 if expirations and strategy != "None":
@@ -237,7 +232,19 @@ def load_data(market_state_key):
                         ask_val = row['ask'].values[0]
                         if pd.isna(ask_val) or ask_val == 0: ask_val = row['lastPrice'].values[0]
                         
-                        setup_data = {"action": "Buy to Open (BTO) ITM LEAPS Call", "exp": closest_exp, "strike": f"${row['strike'].values[0]} Call", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(ask_val * 100):,.2f}", "stop_loss": f"Close position if underlying closes below 200 EMA (${ema200:.2f}) OR if option premium draws down 50% from entry (${(ask_val * 50):,.2f})."}
+                        opt_vol = row['volume'].values[0] if not pd.isna(row['volume'].values[0]) else 0
+                        opt_oi = row['openInterest'].values[0] if not pd.isna(row['openInterest'].values[0]) else 1
+                        opt_vol_ratio = round(opt_vol / max(opt_oi, 1), 2)
+
+                        setup_data = {
+                            "action": "Buy to Open (BTO) ITM LEAPS Call", 
+                            "exp": closest_exp, 
+                            "strike": f"${row['strike'].values[0]} Call", 
+                            "delta": f"{row['BS_Delta'].values[0]:.2f}", 
+                            "contract_cost": f"${(ask_val * 100):,.2f}", 
+                            "stop_loss": f"Close if underlying closes below 200 EMA (${ema200:.2f}) OR option premium draws down 50% (${(ask_val * 50):,.2f}).",
+                            "stop_loss_col": f"EMA 200 (${ema200:.1f}) / -50% Premium"
+                        }
                         
                     elif strategy == "PMCC":
                         closest_exp = min(expirations, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target_short_date))
@@ -251,7 +258,19 @@ def load_data(market_state_key):
                         bid_val = row['bid'].values[0]
                         if pd.isna(bid_val) or bid_val == 0: bid_val = row['lastPrice'].values[0]
 
-                        setup_data = {"action": "Sell to Open (STO) Covered Short Call", "exp": closest_exp, "strike": f"${strike_val} Call", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(bid_val * 100):,.2f} Credit", "stop_loss": f"Buy-to-Close (BTC) if underlying breaches Short Strike (${strike_val:.2f}). Manage long delta exposure if spot drops below 200 EMA."}
+                        opt_vol = row['volume'].values[0] if not pd.isna(row['volume'].values[0]) else 0
+                        opt_oi = row['openInterest'].values[0] if not pd.isna(row['openInterest'].values[0]) else 1
+                        opt_vol_ratio = round(opt_vol / max(opt_oi, 1), 2)
+
+                        setup_data = {
+                            "action": "Sell to Open (STO) Covered Short Call", 
+                            "exp": closest_exp, 
+                            "strike": f"${strike_val} Call", 
+                            "delta": f"{row['BS_Delta'].values[0]:.2f}", 
+                            "contract_cost": f"${(bid_val * 100):,.2f} Credit", 
+                            "stop_loss": f"Buy-to-Close (BTC) if underlying breaches Short Strike (${strike_val:.2f}). Manage delta if spot drops below 200 EMA.",
+                            "stop_loss_col": f"Short Strike Breach (${strike_val:.1f})"
+                        }
 
                     elif strategy == "CSP":
                         closest_exp = min(expirations, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target_short_date))
@@ -265,11 +284,25 @@ def load_data(market_state_key):
                         bid_val = row['bid'].values[0]
                         if pd.isna(bid_val) or bid_val == 0: bid_val = row['lastPrice'].values[0]
 
-                        setup_data = {"action": "Sell to Open (STO) Cash-Secured Put", "exp": closest_exp, "strike": f"${strike_val} Put", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(bid_val * 100):,.2f} Credit", "stop_loss": f"BTC if premium inflates 300% above entry (${(bid_val * 300):,.2f}), OR take assignment at ${strike_val:.2f} if equity thesis holds."}
+                        opt_vol = row['volume'].values[0] if not pd.isna(row['volume'].values[0]) else 0
+                        opt_oi = row['openInterest'].values[0] if not pd.isna(row['openInterest'].values[0]) else 1
+                        opt_vol_ratio = round(opt_vol / max(opt_oi, 1), 2)
+
+                        setup_data = {
+                            "action": "Sell to Open (STO) Cash-Secured Put", 
+                            "exp": closest_exp, 
+                            "strike": f"${strike_val} Put", 
+                            "delta": f"{row['BS_Delta'].values[0]:.2f}", 
+                            "contract_cost": f"${(bid_val * 100):,.2f} Credit", 
+                            "stop_loss": f"BTC if premium inflates 300% (${(bid_val * 300):,.2f}), OR take assignment at ${strike_val:.2f}.",
+                            "stop_loss_col": f"+300% Premium / Strike (${strike_val:.1f})"
+                        }
                 else:
-                    setup_data = {"action": "No Actionable Strategy / Restricted for ETFs", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "stop_loss": "N/A for ETF asset class or unquoted chain."}
+                    setup_data = {"action": "Restricted / No Chain", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "stop_loss": "N/A", "stop_loss_col": "N/A"}
+                    opt_vol_ratio = 0.0
             except Exception:
-                setup_data = {"action": "Data Fetch Incomplete", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "stop_loss": "Option chain unavailable."}
+                setup_data = {"action": "Data Fetch Incomplete", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "stop_loss": "Unavailable", "stop_loss_col": "N/A"}
+                opt_vol_ratio = 0.0
                 
             results.append({
                 "Ticker": ticker,
@@ -278,9 +311,12 @@ def load_data(market_state_key):
                 "Strategy": strategy,
                 "HVR (Vol Rank)": hvr,
                 "IV Crush Setup": iv_crush_status,
+                "Stock Vol Ratio": stock_vol_ratio,
+                "Opt Vol/OI Ratio": opt_vol_ratio,
                 "RSI": rsi,
                 "MACD": macd_status,
                 "200 EMA": ema200_status,
+                "Stop-Loss Setup": setup_data.get("stop_loss_col", "N/A"),
                 "Earnings": earnings_date_str,
                 "Setup": setup_data
             })
@@ -289,9 +325,8 @@ def load_data(market_state_key):
     
     return pd.DataFrame(results)
 
-# Header Section
-st.title("Options & Derivatives Screener")
-st.markdown("Quantitative framework combining **Volatility Rank (HVR)**, Delta targeting, and structured risk limits.")
+st.title("Institutional Options & Derivatives Screener")
+st.markdown("Quantitative framework combining **Volatility Rank (HVR)**, Volume Ratios, Delta targeting, and structured stop-losses.")
 
 market_key = get_market_state_key()
 st.caption(f"Market State: **{market_key.replace('_', ' ').title()}** (Resets automatically M-F every 15 minutes)")
@@ -316,14 +351,17 @@ st.markdown("---")
 st.markdown("#### Actionable Positions")
 st.caption("Select any row below to view live contract pricing and execution rules.")
 
-def highlight_iv_crush(val):
-    if isinstance(val, str) and 'Optimal' in val:
-        return 'background-color: #E6F4ED; color: #178754; font-weight: 600;'
+def color_formatting(val):
+    if isinstance(val, str):
+        if any(w in val for w in ['Optimal', 'Bullish', 'Bull Cross', 'Above']):
+            return 'background-color: #E6F4ED; color: #178754; font-weight: 600;'
+        elif any(w in val for w in ['Warning', 'Bearish', 'Bear Cross', 'Below', 'Sub-optimal']):
+            return 'background-color: #FCE8E6; color: #C5221F; font-weight: 600;'
     return ''
 
-display_cols = ["Ticker", "Type", "Price", "Strategy", "HVR (Vol Rank)", "IV Crush Setup", "RSI", "MACD", "200 EMA", "Earnings"]
+display_cols = ["Ticker", "Type", "Price", "Strategy", "HVR (Vol Rank)", "IV Crush Setup", "Stock Vol Ratio", "Opt Vol/OI Ratio", "RSI", "MACD", "200 EMA", "Stop-Loss Setup", "Earnings"]
 
-styled_df = filtered_df[display_cols].style.map(highlight_iv_crush, subset=['IV Crush Setup'])
+styled_df = filtered_df[display_cols].style.map(color_formatting, subset=['IV Crush Setup', 'MACD', '200 EMA'])
 
 selection = st.dataframe(
     styled_df,
@@ -332,12 +370,10 @@ selection = st.dataframe(
     selection_mode="single-row",
     on_select="rerun",
     column_config={
+        "Stock Vol Ratio": st.column_config.NumberColumn("Stock Vol Ratio", help="Today's stock volume relative to its 20-day Volume SMA (>1.0 indicates abnormal volume accumulation)."),
+        "Opt Vol/OI Ratio": st.column_config.NumberColumn("Opt Vol/OI Ratio", help="Option Volume to Open Interest ratio on the target strike (>1.0 indicates heavy fresh positioning or sweep activity)."),
         "HVR (Vol Rank)": st.column_config.NumberColumn("HVR (Vol Rank)", help="Historical Volatility Rank (0-100)."),
-        "IV Crush Setup": st.column_config.TextColumn("IV Crush Setup", help="Evaluates volatility regime against strategy Vega exposure."),
-        "RSI": st.column_config.NumberColumn("RSI", help="14-day Relative Strength Index (< 42 triggers LEAPS for stocks)."),
-        "MACD": st.column_config.TextColumn("MACD", help="Momentum indicator."),
-        "200 EMA": st.column_config.TextColumn("200 EMA", help="Macro trend filter."),
-        "Earnings": st.column_config.TextColumn("Earnings", help="Upcoming earnings release date.")
+        "Stop-Loss Setup": st.column_config.TextColumn("Stop-Loss Setup", help="Systematic stop-loss or risk control trigger for the active position.")
     }
 )
 
