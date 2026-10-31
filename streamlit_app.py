@@ -121,7 +121,6 @@ def load_data():
             elif macd_line > signal_line: macd_status = "Bullish"
                 
             ema200_status = "Above" if current_price > ema200 else "Below"
-            oi_matrix = np.random.choice(["Bullish Call Skew", "Bearish Put Skew", "Neutral"])
             
             earnings_date_str = "None Recorded"
             try:
@@ -137,9 +136,6 @@ def load_data():
             else:
                 strategy = "CSP"
 
-            # -------------------------------------------------------------
-            # IV CRUSH LOGIC: Determine if the vol regime fits the strategy
-            # -------------------------------------------------------------
             iv_crush_status = "Neutral"
             if strategy == "ITM_LEAPS":
                 iv_crush_status = "Optimal (Avoids Crush)" if hvr < 45 else "Warning (Vega Risk)"
@@ -162,14 +158,8 @@ def load_data():
                         ask_val = row['ask'].values[0]
                         if pd.isna(ask_val) or ask_val == 0: ask_val = row['lastPrice'].values[0]
                         
-                        setup_data = {
-                            "action": "Buy to Open (BTO) ITM LEAPS Call",
-                            "exp": closest_exp,
-                            "strike": f"${row['strike'].values[0]} Call",
-                            "delta": f"{row['BS_Delta'].values[0]:.2f}",
-                            "contract_cost": f"${(ask_val * 100):,.2f}",
-                            "stop_loss": f"Close position if underlying closes below 200 EMA (${ema200:.2f}) OR if option premium draws down 50% from entry (${(ask_val * 50):,.2f})."
-                        }
+                        # Flattened dictionary for ITM LEAPS
+                        setup_data = {"action": "Buy to Open (BTO) ITM LEAPS Call", "exp": closest_exp, "strike": f"${row['strike'].values[0]} Call", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(ask_val * 100):,.2f}", "stop_loss": f"Close position if underlying closes below 200 EMA (${ema200:.2f}) OR if option premium draws down 50% from entry (${(ask_val * 50):,.2f})."}
                         
                     elif strategy == "PMCC":
                         closest_exp = min(expirations, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target_short_date))
@@ -184,14 +174,8 @@ def load_data():
                         bid_val = row['bid'].values[0]
                         if pd.isna(bid_val) or bid_val == 0: bid_val = row['lastPrice'].values[0]
 
-                        setup_data = {
-                            "action": "Sell to Open (STO) Covered Short Call",
-                            "exp": closest_exp,
-                            "strike": f"${strike_val} Call",
-                            "delta": f"{row['BS_Delta'].values[0]:.2f}",
-                            "contract_cost": f"${(bid_val * 100):,.2f} Credit",
-                            "stop_loss": f"Buy-to-Close (BTC) if underlying breaches Short Strike (${strike_val:.2f}). Manage long LEAPS delta exposure if spot drops below 200 EMA."
-                        }
+                        # Flattened dictionary for PMCC
+                        setup_data = {"action": "Sell to Open (STO) Covered Short Call", "exp": closest_exp, "strike": f"${strike_val} Call", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(bid_val * 100):,.2f} Credit", "stop_loss": f"Buy-to-Close (BTC) if underlying breaches Short Strike (${strike_val:.2f}). Manage long LEAPS delta exposure if spot drops below 200 EMA."}
 
                     elif strategy == "CSP":
                         closest_exp = min(expirations, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target_short_date))
@@ -206,14 +190,8 @@ def load_data():
                         bid_val = row['bid'].values[0]
                         if pd.isna(bid_val) or bid_val == 0: bid_val = row['lastPrice'].values[0]
 
-                        setup_data = {
-                            "action": "Sell to Open (STO) Cash-Secured Put",
-                            "exp": closest_exp,
-                            "strike": f"${strike_val} Put",
-                            "delta": f"{row['BS_Delta'].values[0]:.2f}",
-                            "contract_cost": f"${(bid_val * 100):,.2f} Credit",
-                            "stop_loss": f"BTC if premium inflates 300% above entry (${(bid_val * 300):,.2f}), OR take assignment at ${strike_val:.2f} if equity thesis holds."
-                        }
+                        # Flattened dictionary for CSP
+                        setup_data = {"action": "Sell to Open (STO) Cash-Secured Put", "exp": closest_exp, "strike": f"${strike_val} Put", "delta": f"{row['BS_Delta'].values[0]:.2f}", "contract_cost": f"${(bid_val * 100):,.2f} Credit", "stop_loss": f"BTC if premium inflates 300% above entry (${(bid_val * 300):,.2f}), OR take assignment at ${strike_val:.2f} if equity thesis holds."}
             except Exception:
                 setup_data = {"action": "Data Fetch Incomplete", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "stop_loss": "Option chain unavailable."}
                 
@@ -235,25 +213,21 @@ def load_data():
     
     return pd.DataFrame(results)
 
-# Header Section
 st.title("Institutional Options & Derivatives Screener")
 st.markdown("Quantitative Screener factoring **Volatility Rank (HVR)** alongside Delta targeting & Stop-Loss execution.")
 
 df = load_data()
 
-# Metric KPI Highlights
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Monitored", len(df))
 c2.metric("ITM LEAPS Setups (Low Vol)", len(df[df['Strategy'] == 'ITM_LEAPS']))
 c3.metric("Short Premium Setups", len(df[df['Strategy'].isin(['PMCC', 'CSP'])]))
 c4.metric("High Volatility Exceedances", len(df[df['HVR (Vol Rank)'] > 75]))
 
-# Sidebar Controls
 st.sidebar.markdown("### Strategic Filters")
 sel_type = st.sidebar.selectbox("Equity Type", ["All", "Stock", "ETF", "Leveraged ETF"])
 sel_strategy = st.sidebar.selectbox("Target Strategy", ["All", "ITM_LEAPS", "PMCC", "CSP"])
 
-# Filter DataFrame
 filtered_df = df.copy()
 if sel_type != "All": filtered_df = filtered_df[filtered_df['Type'] == sel_type]
 if sel_strategy != "All": filtered_df = filtered_df[filtered_df['Strategy'] == sel_strategy]
@@ -262,7 +236,6 @@ st.markdown("---")
 st.markdown("#### Actionable Positions")
 st.caption("Click any row below to instantly calculate live contract pricing and strict risk-management parameters.")
 
-# --- DATAFRAME STYLING FOR IV CRUSH HIGHLIGHTING ---
 def highlight_iv_crush(val):
     if isinstance(val, str) and 'Optimal' in val:
         return 'background-color: rgba(45, 206, 137, 0.15); color: #1e8e5e; font-weight: bold;'
@@ -270,10 +243,8 @@ def highlight_iv_crush(val):
 
 display_cols = ["Ticker", "Type", "Price", "Strategy", "HVR (Vol Rank)", "IV Crush Setup", "RSI", "MACD", "200 EMA", "Earnings"]
 
-# Apply pandas styler
 styled_df = filtered_df[display_cols].style.map(highlight_iv_crush, subset=['IV Crush Setup'])
 
-# Interactive Dataframe
 selection = st.dataframe(
     styled_df,
     use_container_width=True,
@@ -282,16 +253,13 @@ selection = st.dataframe(
     on_select="rerun"
 )
 
-# Determine selected ticker
 selected_ticker = None
 if selection and selection.get("selection", {}).get("rows"):
-    # Streamlit returns the integer positional index of the underlying dataframe
     selected_idx = selection["selection"]["rows"][0]
     selected_ticker = filtered_df.iloc[selected_idx]["Ticker"]
 elif not filtered_df.empty:
     selected_ticker = filtered_df.iloc[0]["Ticker"]
 
-# Strategy Details Card
 st.markdown("---")
 if selected_ticker:
     row_data = filtered_df[filtered_df['Ticker'] == selected_ticker].iloc[0]
@@ -330,140 +298,6 @@ if selected_ticker:
             <div style="font-size: 0.95rem; font-weight: 600; color: #32325d; margin-top: 4px;">
                 {setup.get('stop_loss', '')}
             </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-Covered Short Call",
-                            "exp": closest_exp,
-                            "strike": f"${row['strike'].values[0]} Call",
-                            "delta": f"{row['BS_Delta'].values[0]:.2f}",
-                            "contract_cost": f"${(bid_val * 100):,.2f} Credit",
-                            "guidance": f"Volatility Rank: {hvr}. Sell against existing long LEAPS position to harvest theta."
-                        }
-
-                    elif strategy == "CSP":
-                        closest_exp = min(expirations, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target_short_date))
-                        T_years = max((datetime.strptime(closest_exp, '%Y-%m-%d') - datetime.now()).days / 365.25, 0.01)
-                        chain = t_yfinance.option_chain(closest_exp).puts
-                        chain['BS_Delta'] = chain.apply(lambda r: calc_black_scholes_delta(current_price, r['strike'], T_years, RISK_FREE_RATE, r['impliedVolatility'], 'put'), axis=1)
-                        valid = chain[chain.apply(validate_liquidity, axis=1)]
-                        if valid.empty: valid = chain
-                        row = valid.iloc[(valid['BS_Delta'] - (-0.25)).abs().argsort()[:1]]
-                        
-                        bid_val = row['bid'].values[0]
-                        if pd.isna(bid_val) or bid_val == 0: bid_val = row['lastPrice'].values[0]
-
-                        setup_data = {
-                            "action": "Sell to Open (STO) Cash-Secured Put",
-                            "exp": closest_exp,
-                            "strike": f"${row['strike'].values[0]} Put",
-                            "delta": f"{row['BS_Delta'].values[0]:.2f}",
-                            "contract_cost": f"${(bid_val * 100):,.2f} Credit",
-                            "guidance": f"Volatility Rank: {hvr}. Requires ${(row['strike'].values[0] * 100):,.2f} cash collateral. Exploiting short Vega decay."
-                        }
-            except Exception:
-                setup_data = {"action": "Data Fetch Incomplete", "exp": "-", "strike": "-", "delta": "-", "contract_cost": "-", "guidance": "Option chain unavailable."}
-                
-            results.append({
-                "Ticker": ticker,
-                "Price": f"${current_price:,.2f}",
-                "Sector": sector,
-                "Strategy": strategy,
-                "RSI": rsi,
-                "MACD": macd_status,
-                "200 EMA": ema200_status,
-                "HVR (Vol Rank)": hvr,
-                "OI Matrix": oi_matrix,
-                "Earnings": earnings_date_str,
-                "Setup": setup_data
-            })
-            
-        except Exception: pass
-    
-    return pd.DataFrame(results)
-
-# Header Section
-st.title("Institutional Options & Derivatives Screener")
-st.markdown("Quantitative Screener factoring **Volatility Rank (HVR)** alongside Delta targeting.")
-
-df = load_data()
-
-# Metric KPI Highlights
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Monitored", len(df))
-c2.metric("ITM LEAPS Setups (Low Vol)", len(df[df['Strategy'] == 'ITM_LEAPS']))
-c3.metric("Short Premium Setups", len(df[df['Strategy'].isin(['PMCC', 'CSP'])]))
-c4.metric("High Volatility Exceedances", len(df[df['HVR (Vol Rank)'] > 75]))
-
-# Sidebar Controls
-st.sidebar.markdown("### Strategic Filters")
-all_sectors = ["All"] + sorted(list(df['Sector'].unique()))
-sel_sector = st.sidebar.selectbox("Sector / Theme", all_sectors)
-sel_strategy = st.sidebar.selectbox("Target Strategy", ["All", "ITM_LEAPS", "PMCC", "CSP"])
-
-# Filter DataFrame
-filtered_df = df.copy()
-if sel_sector != "All": filtered_df = filtered_df[filtered_df['Sector'] == sel_sector]
-if sel_strategy != "All": filtered_df = filtered_df[filtered_df['Strategy'] == sel_strategy]
-
-st.markdown("---")
-st.markdown("#### Actionable Positions")
-st.caption("Click any row below to instantly calculate live contract pricing based on Black-Scholes Greeks.")
-
-# Interactive Dataframe
-display_cols = ["Ticker", "Price", "Sector", "Strategy", "HVR (Vol Rank)", "RSI", "MACD", "200 EMA", "Earnings"]
-selection = st.dataframe(
-    filtered_df[display_cols],
-    use_container_width=True,
-    hide_index=True,
-    selection_mode="single-row",
-    on_select="rerun"
-)
-
-# Determine selected ticker
-selected_ticker = None
-if selection and selection.get("selection", {}).get("rows"):
-    selected_idx = selection["selection"]["rows"][0]
-    selected_ticker = filtered_df.iloc[selected_idx]["Ticker"]
-elif not filtered_df.empty:
-    selected_ticker = filtered_df.iloc[0]["Ticker"]
-
-# Strategy Details Card
-st.markdown("---")
-if selected_ticker:
-    row_data = filtered_df[filtered_df['Ticker'] == selected_ticker].iloc[0]
-    setup = row_data["Setup"]
-    strat = row_data["Strategy"]
-    
-    badge_class = "badge-leaps" if strat == "ITM_LEAPS" else ("badge-pmcc" if strat == "PMCC" else "badge-csp")
-    
-    st.markdown(f"""
-    <div class="strategy-card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h3 style="margin: 0; color: #32325d;">{row_data['Ticker']} &mdash; <span class="{badge_class}">{strat.replace('_', ' ')}</span></h3>
-            <span style="font-size: 1.2rem; font-weight: 700; color: #525f7f;">Spot: {row_data['Price']}</span>
-        </div>
-        <p style="color: #525f7f; font-weight: 600; margin-bottom: 18px;">Action: {setup.get('action', 'Pending')}</p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 16px;">
-            <div style="background: #f8f9fe; padding: 12px 16px; border-radius: 8px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #8898aa; font-weight: 700;">Target Expiration</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #32325d;">{setup.get('exp', '-')}</div>
-            </div>
-            <div style="background: #f8f9fe; padding: 12px 16px; border-radius: 8px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #8898aa; font-weight: 700;">Recommended Strike</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #32325d;">{setup.get('strike', '-')}</div>
-            </div>
-            <div style="background: #f8f9fe; padding: 12px 16px; border-radius: 8px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #8898aa; font-weight: 700;">Calculated Delta</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #32325d;">&Delta; {setup.get('delta', '-')}</div>
-            </div>
-            <div style="background: #f8f9fe; padding: 12px 16px; border-radius: 8px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #8898aa; font-weight: 700;">Est. Premium</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #2dce89;">{setup.get('contract_cost', '-')}</div>
-            </div>
-        </div>
-        <div style="font-size: 0.85rem; color: #8898aa; font-style: italic;">
-            {setup.get('guidance', '')}
         </div>
     </div>
     """, unsafe_allow_html=True)
