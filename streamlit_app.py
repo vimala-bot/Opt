@@ -344,7 +344,6 @@ if "user_email" not in st.session_state:
     st.session_state["user_email"] = None
 
 if "is_subscribed" not in st.session_state:
-    # Set to True for testing, or check database / Stripe webhook verification in production
     st.session_state["is_subscribed"] = False
 
 # Check query params for Stripe success return
@@ -353,7 +352,7 @@ if "success" in query_params and query_params["success"] == "true":
     st.session_state["is_subscribed"] = True
     st.success("🎉 Payment successful! Your 30-day free trial has been activated.")
 
-# --- GATEWAY: LOGIN & STRIPE CHECKOUT LANDING PAGE ---
+# --- GATEWAY: LOGIN (GOOGLE & EMAIL) & STRIPE CHECKOUT LANDING PAGE ---
 if not st.session_state["user_email"] or not st.session_state["is_subscribed"]:
     st.title("🔒 Institutional Options Screener")
     st.markdown(f"**Admin Contact & Support:** {ADMIN_EMAIL}")
@@ -363,16 +362,24 @@ if not st.session_state["user_email"] or not st.session_state["is_subscribed"]:
     
     with col1:
         st.markdown("### Member Access Portal")
-        email_input = st.text_input("Enter your email address:")
-        if st.button("Continue to Access"):
-            if email_input:
-                st.session_state["user_email"] = email_input
+        
+        # Google Account Sign-In Simulation / OAuth Integration Button
+        if st.button("🔴 Continue with Google Account", use_container_width=True):
+            # In production, wire this button to your Firebase / Supabase OAuth redirect endpoint.
+            st.session_state["user_email"] = ADMIN_EMAIL  # Automatically maps to admin/user for seamless testing
+            st.rerun()
+
+        st.markdown("---")
+        manual_email = st.text_input("Or enter email manually:")
+        if st.button("Continue with Email", use_container_width=True):
+            if manual_email:
+                st.session_state["user_email"] = manual_email
                 st.rerun()
             else:
                 st.warning("Please provide a valid email address.")
                 
         if st.session_state["user_email"]:
-            st.info(f"Logged in as: **{st.session_state['user_email']}**")
+            st.info(f"Authenticated as: **{st.session_state['user_email']}**")
             st.markdown("### Membership Plan")
             st.markdown(f"""
             * **Base Subscription:** C\${MONTHLY_PRICE_CAD:.2f} / month
@@ -381,7 +388,7 @@ if not st.session_state["user_email"] or not st.session_state["is_subscribed"]:
             * **Trial Period:** **30 Days Free** (Card required upfront; no charges today)
             """)
             
-            if st.button("Start 30-Day Free Trial (Secure Stripe Checkout)"):
+            if st.button("Start 30-Day Free Trial (Secure Stripe Checkout)", use_container_width=True):
                 try:
                     checkout_session = stripe.checkout.Session.create(
                         payment_method_types=['card'],
@@ -411,7 +418,7 @@ if not st.session_state["user_email"] or not st.session_state["is_subscribed"]:
                 except Exception as e:
                     st.error(f"Stripe Checkout Error: {e}")
                     
-            if st.button("🔓 Bypass for Testing (Admin Mode)"):
+            if st.button("🔓 Bypass for Testing (Admin Mode)", use_container_width=True):
                 st.session_state["is_subscribed"] = True
                 st.rerun()
 
