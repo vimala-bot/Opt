@@ -82,7 +82,6 @@ def calculate_technicals(df):
     volume = df['Volume']
     df['EMA_200'] = close.ewm(span=200, adjust=False).mean()
     
-    # Stock Volume Ratio (Today Volume / 20-day Volume SMA)
     df['Vol_SMA_20'] = volume.rolling(window=20).mean()
     df['Stock_Vol_Ratio'] = np.where(df['Vol_SMA_20'] > 0, round(volume / df['Vol_SMA_20'], 2), 1.0)
 
@@ -177,7 +176,7 @@ def load_data(market_state_key):
             current_price = float(latest['Close'])
             rsi = round(float(latest['RSI_14']), 2) if not pd.isna(latest['RSI_14']) else 50.0
             ema200 = float(latest['EMA_200'])
-            hvr = round(float(latest['HVR']), 2) if not pd.isna(latest['HVR']), 2) if not pd.isna(latest['HVR']) else 50.0
+            hvr = round(float(latest['HVR']), 2) if not pd.isna(latest['HVR']) else 50.0
             stock_vol_ratio = float(latest['Stock_Vol_Ratio'])
             
             macd_line, signal_line = latest['MACD'], latest['MACD_Signal']
