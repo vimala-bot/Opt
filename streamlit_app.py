@@ -1,11 +1,25 @@
 import streamlit as st
+import stripe
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Institutional Options Screener", layout="wide", initial_sidebar_state="expanded")
+# --- CONFIGURATION & ADMIN SETUP ---
+ADMIN_EMAIL = "vishnu.merapala@gmail.com"
+CURRENCY = "cad"
+MONTHLY_PRICE_CAD = 5.00
+HST_RATE = 0.13  # Ontario HST 13%
+TOTAL_MONTHLY_CHARGED = MONTHLY_PRICE_CAD * (1 + HST_RATE) # C$5.65 total including HST
+
+st.set_page_config(page_title="Institutional Options & Derivatives Screener", layout="wide", initial_sidebar_state="expanded")
+
+# Initialize Stripe securely from Streamlit Secrets
+try:
+    stripe.api_key = st.secrets["STRIPE_API_KEY"]
+except Exception:
+    stripe.api_key = "sk_test_mockkey"
 
 # --- WEALTHSIMPLE & QUANT INSTITUTIONAL CSS ---
 st.markdown("""
@@ -62,6 +76,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- QUANTITATIVE PRICING & TECHNICAL MODULES ---
 def calc_black_scholes_delta(S, K, T, r, sigma, option_type='call'):
     if T <= 0 or pd.isna(sigma) or sigma <= 0: return 0.0
     try:
@@ -324,11 +339,104 @@ def load_data(market_state_key):
     
     return pd.DataFrame(results)
 
+# --- AUTHENTICATION & SUBSCRIPTION SESSION MANAGEMENT ---
+if "user_email" not in st.session_state:
+    st.session_state["user_email"] = None
+
+if "is_subscribed" not in st.session_state:
+    # Set to True for testing, or check database / Stripe webhook verification in production
+    st.session_state["is_subscribed"] = False
+
+# Check query params for Stripe success return
+query_params = st.query_params
+if "success" in query_params and query_params["success"] == "true":
+    st.session_state["is_subscribed"] = True
+    st.success("🎉 Payment successful! Your 30-day free trial has been activated.")
+
+# --- GATEWAY: LOGIN & STRIPE CHECKOUT LANDING PAGE ---
+if not st.session_state["user_email"] or not st.session_state["is_subscribed"]:
+    st.title("🔒 Institutional Options Screener")
+    st.markdown(f"**Admin Contact & Support:** {ADMIN_EMAIL}")
+    st.markdown("---")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("### Member Access Portal")
+        email_input = st.text_input("Enter your email address:")
+        if st.button("Continue to Access"):
+            if email_input:
+                st.session_state["user_email"] = email_input
+                st.rerun()
+            else:
+                st.warning("Please provide a valid email address.")
+                
+        if st.session_state["user_email"]:
+            st.info(f"Logged in as: **{st.session_state['user_email']}**")
+            st.markdown("### Membership Plan")
+            st.markdown(f"""
+            * **Base Subscription:** C\${MONTHLY_PRICE_CAD:.2f} / month
+            * **Ontario HST (13%):** C\${(MONTHLY_PRICE_CAD * HST_RATE):.2f}
+            * **Total Billed Monthly:** **C\${TOTAL_MONTHLY_CHARGED:.2f} / month**
+            * **Trial Period:** **30 Days Free** (Card required upfront; no charges today)
+            """)
+            
+            if st.button("Start 30-Day Free Trial (Secure Stripe Checkout)"):
+                try:
+                    checkout_session = stripe.checkout.Session.create(
+                        payment_method_types=['card'],
+                        customer_email=st.session_state["user_email"],
+                        line_items=[{
+                            'price_data': {
+                                'currency': CURRENCY,
+                                'product_data': {
+                                    'name': 'Institutional Options Screener (Monthly)',
+                                },
+                                'unit_amount': int(TOTAL_MONTHLY_CHARGED * 100),
+                                'recurring': {
+                                    'interval': 'month',
+                                },
+                            },
+                            'quantity': 1,
+                        }],
+                        subscription_data={
+                            'trial_period_days': 30,
+                        },
+                        mode='subscription',
+                        success_url='https://' + st.context.headers.get("Host", "localhost:8501") + '/?success=true',
+                        cancel_url='https://' + st.context.headers.get("Host", "localhost:8501") + '/?canceled=true',
+                    )
+                    st.markdown(f'<meta http-equiv="refresh" content="0;url={checkout_session.url}">', unsafe_allow_html=True)
+                    st.success("Redirecting to Stripe Checkout...")
+                except Exception as e:
+                    st.error(f"Stripe Checkout Error: {e}")
+                    
+            if st.button("🔓 Bypass for Testing (Admin Mode)"):
+                st.session_state["is_subscribed"] = True
+                st.rerun()
+
+    with col2:
+        st.markdown("### Why Institutional Options Screener?")
+        st.markdown("""
+        * **236 Tracked Assets:** Comprehensive scanning across Stocks, ETFs, and Leveraged ETFs.
+        * **Volatility Rank (HVR):** Real-time mathematical proxy for premium regimes.
+        * **Volume Ratios:** Track underlying stock accumulation and options sweep positioning.
+        * **Risk Management:** Strict delta-targeting and stop-loss criteria per asset.
+        """)
+
+    st.stop()  # Halt execution until authenticated & subscribed
+
+# --- MAIN APP: INSTITUTIONAL OPTIONS SCREENER ---
 st.title("Institutional Options & Derivatives Screener")
 st.markdown("Quantitative framework combining **Volatility Rank (HVR)**, Volume Ratios, Delta targeting, and structured stop-losses.")
 
 market_key = get_market_state_key()
-st.caption(f"Market State: **{market_key.replace('_', ' ').title()}** (Resets automatically M-F every 15 minutes)")
+st.caption(f"Market State: **{market_key.replace('_', ' ').title()}** (Resets automatically M-F every 15 minutes) | User: {st.session_state['user_email']}")
+
+if st.sidebar.button("Sign Out / Switch Account"):
+    st.session_state["user_email"] = None
+    st.session_state["is_subscribed"] = False
+    st.rerun()
 
 df = load_data(market_key)
 
